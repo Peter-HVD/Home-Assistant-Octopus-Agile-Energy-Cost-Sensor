@@ -1,145 +1,111 @@
 blueprint:
-  name: "Octopus Agile – Energy Cost Sensor"
+  name: "Octopus Agile - Energy Cost Tracker"
   description: >
-    Creates a template sensor that tracks the running electricity cost (in £)
-    for a smart plug, by multiplying its energy consumption (kWh) by the live
-    Octopus Agile unit rate.
+    Logs the running electricity cost (in GBP) for a smart plug each time the
+    energy reading or the Agile unit rate changes.
 
-    **Requirements**
-    - Bottlecapdave Octopus Energy HACS integration installed and configured.
-    - A smart plug (or any device) that exposes an energy sensor in kWh.
 
-    The new sensor is registered on the same device as your smart plug so it
-    appears alongside its other entities in the device page.
+    ## companion sensor setup (do this first)
+
+
+    Before activating this automation, create the cost sensor via the HA UI.
+    This only needs to be done once.
+
+
+    **Step 1 – Create a Template Sensor**
+
+    1. Go to **Settings → Devices & Services → Helpers**.
+
+    2. Click **+ Create Helper** and choose **Template → Template Sensor**.
+
+    3. Fill in the fields as follows:
+
+    - **Name:** e.g. `3D Printer Energy Cost`
+
+    - **State template:**
+      ```
+      {{ (states('sensor.3d_printer_energy') | float(0)) * (states('sensor.octopus_energy_electricity_current_rate') | float(0)) }}
+      ```
+      *(Replace `sensor.3d_printer_energy` with your plug's energy entity if different.)*
+
+    - **Unit of measurement:** `GBP`
+
+    - **Device class:** `Monetary`
+
+    - **State class:** `Total increasing`
+
+    - **Icon:** `mdi:currency-gbp`
+
+    4. Click **Submit**.
+
+
+    **Step 2 – Assign the sensor to your smart plug device**
+
+    1. Go to **Settings → Devices & Services → Entities**.
+
+    2. Search for the sensor name you just created.
+
+    3. Click the entity → click the **pencil (edit) icon**.
+
+    4. Under **Device**, select your smart plug device.
+
+    5. Click **Update**.
+
+
+    Once the helper is created, come back and complete the automation setup below.
+
   domain: automation
   author: "Claude / Anthropic"
   input:
     agile_rate_entity:
-      name: "Octopus Agile – Current Rate Entity"
+      name: "Octopus Agile Current Rate Entity"
       description: >
-        The sensor that provides the live Agile unit price in £/kWh.
-        Typically `sensor.octopus_energy_electricity_current_rate`.
+        Sensor providing the live Agile unit price in GBP/kWh.
+        Typically sensor.octopus_energy_electricity_current_rate.
+      default: sensor.octopus_energy_electricity_current_rate
       selector:
         entity:
           domain: sensor
-      default: sensor.octopus_energy_electricity_current_rate
 
     plug_energy_entity:
       name: "Smart Plug Energy Entity (kWh)"
       description: >
-        The sensor on your smart plug that reports cumulative energy
-        consumption in kWh (e.g. `sensor.3d_printer_energy`).
+        Sensor on your smart plug reporting cumulative energy in kWh
+        (e.g. sensor.3d_printer_energy).
       selector:
         entity:
           domain: sensor
 
-    plug_device:
-      name: "Smart Plug Device"
-      description: >
-        The device the smart plug belongs to. The new cost sensor will be
-        registered on this device so it appears on the same device page.
-      selector:
-        device:
-
-# ── Automation body ────────────────────────────────────────────────────────────
-# This automation fires on HA start and then every time EITHER the energy
-# sensor OR the Agile rate changes. It writes the calculated cost into a
-# persistent input_number that lives on the plug's device.
-#
-# Because Home Assistant blueprints cannot create helper entities directly,
-# the blueprint uses a `template` sensor declared via the automation's
-# `trigger`/`action` pattern together with `homeassistant.set_entity_attr`
-# for the device assignment. The recommended approach is to have the blueprint
-# create the sensor through a `template` platform stanza in configuration.yaml
-# – instructions are printed to the HA log on first run.
-# ──────────────────────────────────────────────────────────────────────────────
-
 trigger:
-  # Re-calculate whenever the energy reading changes …
   - platform: state
     entity_id: !input plug_energy_entity
-  # … or whenever the Agile rate ticks over to a new half-hour slot.
   - platform: state
     entity_id: !input agile_rate_entity
-  # Also recalculate 30 s after HA restarts.
   - platform: homeassistant
     event: start
 
 variables:
   agile_rate_entity: !input agile_rate_entity
   plug_energy_entity: !input plug_energy_entity
-  plug_device: !input plug_device
 
-action:
-  # ── Step 1: Guard against unavailable sensors ─────────────────────────────
+condition:
   - condition: template
     value_template: >
       {{ states(agile_rate_entity) not in ['unavailable', 'unknown', 'none']
          and states(plug_energy_entity) not in ['unavailable', 'unknown', 'none'] }}
 
-  # ── Step 2: Calculate the cost and write it to a helper ───────────────────
+action:
   - variables:
       energy_kwh: "{{ states(plug_energy_entity) | float(0) }}"
       rate_gbp_per_kwh: "{{ states(agile_rate_entity) | float(0) }}"
       cost_gbp: "{{ (energy_kwh * rate_gbp_per_kwh) | round(4) }}"
-
-  # ── Step 3: Persist the value via a notify/logbook entry (fallback) ────────
-  # The primary mechanism is the companion template sensor below (see README).
   - service: logbook.log
     data:
       name: "Octopus Agile Cost Tracker"
       message: >
-        {{ plug_energy_entity }} used {{ energy_kwh }} kWh
-        @ £{{ rate_gbp_per_kwh }}/kWh = £{{ cost_gbp }} total cost.
+        {{ plug_energy_entity }} consumed {{ energy_kwh }} kWh
+        at GBP {{ rate_gbp_per_kwh }}/kWh = GBP {{ cost_gbp }} total.
       entity_id: "{{ plug_energy_entity }}"
 
 mode: single
 max_exceeded: silent
-
----
-# ════════════════════════════════════════════════════════════════════════════════
-# COMPANION TEMPLATE SENSOR  (add to configuration.yaml or a split config file)
-# ════════════════════════════════════════════════════════════════════════════════
-#
-# Blueprints cannot create entities, so paste the block below into your HA
-# configuration. Replace the placeholder values with the ones you chose in the
-# blueprint UI, then restart Home Assistant.
-#
-# template:
-#   - sensor:
-#       - name: "3D Printer Energy Cost"           # ← rename as you like
-#         unique_id: smart_plug_energy_cost_gbp    # ← must be unique in your HA
-#         device_class: monetary
-#         state_class: total_increasing
-#         unit_of_measurement: "GBP"
-#         icon: mdi:currency-gbp
-#
-#         # Replace the two entity IDs below with your actual values:
-#         state: >
-#           {% set energy_kwh = states('sensor.3d_printer_energy') | float(0) %}
-#           {% set rate = states('sensor.octopus_energy_electricity_current_rate') | float(0) %}
-#           {{ (energy_kwh * rate) | round(4) }}
-#
-#         availability: >
-#           {{ states('sensor.3d_printer_energy') not in ['unavailable','unknown']
-#              and states('sensor.octopus_energy_electricity_current_rate') not in ['unavailable','unknown'] }}
-#
-#         attributes:
-#           energy_kwh: >
-#             {{ states('sensor.3d_printer_energy') | float(0) }}
-#           rate_gbp_per_kwh: >
-#             {{ states('sensor.octopus_energy_electricity_current_rate') | float(0) }}
-#           last_updated: "{{ now().isoformat() }}"
-#
-# ── Device assignment ─────────────────────────────────────────────────────────
-# After restarting HA the new sensor will appear under Settings → Entities.
-# To move it onto your smart plug's device page:
-#   1. Go to Settings → Entities.
-#   2. Search for "Energy Cost" (or whatever you named it).
-#   3. Click the entity → click the pencil (edit) icon.
-#   4. Under "Device", select your smart plug device.
-#   5. Click UPDATE.
-#
-# Alternatively, add this to the sensor stanza (requires HA 2024.4+):
-#         device: YOUR_DEVICE_ID   # find via Developer Tools → Template:
-#                                  # {{ device_id('sensor.3d_printer_energy') }}
