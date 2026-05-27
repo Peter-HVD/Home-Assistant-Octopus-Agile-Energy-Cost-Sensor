@@ -32,24 +32,13 @@ blueprint:
 
     - **Device class:** `Monetary`
 
-    - **State class:** `Total increasing`
+    - **State class:** `Total`
 
     - **Icon:** `mdi:currency-gbp`
 
-    4. Click **Submit**.
-
-
-    **Step 2 – Assign the sensor to your smart plug device**
-
-    1. Go to **Settings → Devices & Services → Entities**.
-
-    2. Search for the sensor name you just created.
-
-    3. Click the entity → click the **pencil (edit) icon**.
-
     4. Under **Device**, select your smart plug device.
 
-    5. Click **Update**.
+    5. Click **Submit**.
 
 
     Once the helper is created, come back and complete the automation setup below.
